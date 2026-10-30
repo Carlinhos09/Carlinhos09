@@ -1,0 +1,333 @@
+name: Atualizar cobrinha e estatísticas
+
+# Arquivo único: o código que gera a cobrinha e os cartões está embutido no passo "Gerar SVGs".
+# Basta este arquivo em .github/workflows/snake.yml
+
+on:
+  schedule:
+    - cron: "0 */6 * * *" # a cada 6 horas, sempre com uma rota nova
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: profile-cards
+  cancel-in-progress: true
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Gerar SVGs
+        run: |
+          cat > profile.mjs <<'SCRIPT_EOF'
+          // Gera a animação da cobrinha e os cartões de estatísticas a partir do gráfico de contribuições.
+          // Cada execução sorteia rotas novas, cada volta do loop segue um caminho diferente
+          // e a cobrinha nunca sai da área do gráfico.
+          //
+          // Uso: node profile.mjs <usuario> [pasta-de-saida]
+          import { mkdirSync, writeFileSync } from "node:fs";
+
+          const USER = process.argv[2] ?? process.env.GITHUB_REPOSITORY_OWNER;
+          const OUT_DIR = process.argv[3] ?? "dist";
+
+          const ROUNDS = 3; // voltas diferentes dentro de um mesmo loop
+          const BONUS_APPLES = 4; // maçãs vermelhas em lugares sorteados a cada volta
+          const SNAKE_LEN = 5;
+          const STEP_MS = 90;
+          const CELL = 12;
+          const GAP = 3;
+          const PAD = 2;
+          const PITCH = CELL + GAP;
+
+          const PALETTES = {
+            light: {
+              levels: ["#ebedf0", "#9be9a8", "#40c463", "#30a14e", "#216e39"],
+              snake: "#6e40c9",
+              apple: "#e5534b",
+            },
+            dark: {
+              levels: ["#161b22", "#0e4429", "#006d32", "#26a641", "#39d353"],
+              snake: "#a371f7",
+              apple: "#f85149",
+            },
+          };
+
+          // Gerador pseudoaleatório com semente, para o tema claro e o escuro terem a mesma rota
+          function mulberry32(a) {
+            return () => {
+              a = (a + 0x6d2b79f5) | 0;
+              let t = Math.imul(a ^ (a >>> 15), 1 | a);
+              t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+              return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+            };
+          }
+          const SEED = Number(process.env.SNAKE_SEED ?? Date.now() % 2 ** 32);
+          const rand = mulberry32(SEED);
+          const pick = (arr) => arr[Math.floor(rand() * arr.length)];
+
+          async function loadCells(user) {
+            const res = await fetch(`https://github.com/users/${user}/contributions`);
+            if (!res.ok) throw new Error(`Falha ao buscar contribuições: HTTP ${res.status}`);
+            const html = await res.text();
+
+            // A quantidade de cada dia fica no tooltip ligado à célula pelo id
+            const counts = new Map();
+            for (const [, id, text] of html.matchAll(/<tool-tip[^>]*for="([^"]+)"[^>]*>([^<]*)/g)) {
+              counts.set(id, Number(text.match(/^(\d+) contribution/)?.[1] ?? 0));
+            }
+
+            const days = [];
+            for (const [tag] of html.matchAll(/<td[^>]*ContributionCalendar-day[^>]*>/g)) {
+              const date = tag.match(/data-date="([\d-]+)"/)?.[1];
+              const level = tag.match(/data-level="(\d)"/)?.[1];
+              const id = tag.match(/id="([^"]+)"/)?.[1];
+              if (date && level) days.push({ date, level: Number(level), count: counts.get(id) ?? 0 });
+            }
+            if (!days.length) throw new Error("Nenhum dia encontrado no gráfico de contribuições");
+
+            days.sort((a, b) => (a.date < b.date ? -1 : 1));
+            const start = Date.parse(days[0].date);
+            const startDow = new Date(start).getUTCDay();
+            return days.map((d) => {
+              const n = Math.round((Date.parse(d.date) - start) / 864e5) + startDow;
+              return { ...d, x: Math.floor(n / 7), y: n % 7 };
+            });
+          }
+
+          function buildRoute(cells) {
+            const W = Math.max(...cells.map((c) => c.x)) + 1;
+            const H = 7;
+            const key = (x, y) => `${x},${y}`;
+            const filled = cells.filter((c) => c.level > 0);
+            const empty = cells.filter((c) => c.level === 0);
+
+            const path = [];
+            const eats = new Map(filled.map((c) => [key(c.x, c.y), []]));
+            const apples = [];
+            const roundEnds = [];
+
+            const start = pick(cells);
+            path.push([start.x, start.y]);
+
+            let remaining = new Map();
+            const moveTo = (x, y) => {
+              path.push([x, y]);
+              const t = remaining.get(key(x, y));
+              if (!t) return;
+              remaining.delete(key(x, y));
+              if (t.apple) t.apple.eat = path.length - 1;
+              else eats.get(key(x, y)).push(path.length - 1);
+            };
+            const neighbors = (x, y) =>
+              [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]].filter(
+                ([nx, ny]) => nx >= 0 && nx < W && ny >= 0 && ny < H
+              );
+            const wander = (steps) => {
+              for (let i = 0; i < steps; i++) moveTo(...pick(neighbors(...path.at(-1))));
+            };
+            // Anda até o alvo misturando passos horizontais e verticais ao acaso
+            const walkTo = (tx, ty) => {
+              let [x, y] = path.at(-1);
+              while (x !== tx || y !== ty) {
+                const moveX = x !== tx && (y === ty || rand() < 0.5);
+                if (moveX) x += Math.sign(tx - x);
+                else y += Math.sign(ty - y);
+                moveTo(x, y);
+              }
+            };
+
+            for (let r = 0; r < ROUNDS; r++) {
+              // Sai da célula atual antes de começar, para não comer algo no mesmo instante em que reaparece
+              wander(1);
+
+              remaining = new Map(filled.map((c) => [key(c.x, c.y), { x: c.x, y: c.y }]));
+              const spots = [...empty].sort(() => rand() - 0.5).slice(0, BONUS_APPLES);
+              for (const s of spots) {
+                const apple = { x: s.x, y: s.y, round: r, from: path.length - 1, eat: null };
+                apples.push(apple);
+                remaining.set(key(s.x, s.y), { x: s.x, y: s.y, apple });
+              }
+
+              while (remaining.size) {
+                const [hx, hy] = path.at(-1);
+                const options = [...remaining.values()]
+                  .map((t) => ({ t, d: Math.abs(t.x - hx) + Math.abs(t.y - hy) + rand() * 1.5 }))
+                  .sort((a, b) => a.d - b.d);
+                // Quase sempre vai no mais próximo, mas às vezes escolhe outro: é isso que muda a rota
+                const i = Math.floor(rand() ** 2 * Math.min(3, options.length));
+                const { x, y } = options[i].t;
+                // Alvo embaixo da cabeça: dá um passo para o lado e volta a escolher
+                if (x === hx && y === hy) wander(1);
+                else walkTo(x, y);
+              }
+
+              wander(6);
+              roundEnds.push(path.length - 1);
+            }
+
+            // Volta ao ponto de partida para o loop emendar sem pulo
+            walkTo(...path[0]);
+            return { W, H, path, eats, apples, roundEnds };
+          }
+
+          function render(cells, route, pal) {
+            const { W, H, path, eats, apples, roundEnds } = route;
+            const T = path.length - 1;
+            const dur = ((T * STEP_MS) / 1000).toFixed(2);
+            const pct = (s) => `${+((s / T) * 100).toFixed(4)}%`;
+            const px = (x) => PAD + x * PITCH;
+            const width = PAD * 2 + W * PITCH - GAP;
+            const height = PAD * 2 + H * PITCH - GAP;
+
+            const css = [];
+            const body = [];
+
+            cells.forEach((c, i) => {
+              const color = pal.levels[c.level];
+              const attrs = `x="${px(c.x)}" y="${px(c.y)}" width="${CELL}" height="${CELL}" rx="2"`;
+              const times = eats.get(`${c.x},${c.y}`);
+              if (!times?.length) {
+                body.push(`<rect ${attrs} fill="${color}"/>`);
+                return;
+              }
+              const frames = [`0%{fill:${color}}`];
+              times.forEach((e, r) => {
+                frames.push(`${pct(e)}{fill:${pal.levels[0]}}`, `${pct(roundEnds[r])}{fill:${color}}`);
+              });
+              frames.push(`100%{fill:${color}}`);
+              css.push(`@keyframes c${i}{${frames.join("")}}.c${i}{animation:c${i} ${dur}s steps(1,end) infinite}`);
+              body.push(`<rect ${attrs} class="c${i}" fill="${color}"/>`);
+            });
+
+            apples.forEach((a, i) => {
+              const frames = [`0%{opacity:0}`, `${pct(a.from)}{opacity:1}`, `${pct(a.eat)}{opacity:0}`, `100%{opacity:0}`];
+              css.push(`@keyframes a${i}{${frames.join("")}}.a${i}{opacity:0;animation:a${i} ${dur}s steps(1,end) infinite}`);
+              const cx = px(a.x) + CELL / 2;
+              const cy = px(a.y) + CELL / 2;
+              body.push(`<circle class="a${i}" cx="${cx}" cy="${cy}" r="${CELL / 2 - 1}" fill="${pal.apple}"/>`);
+            });
+
+            // Cada segmento segue a cabeça com atraso; só guardamos os quadros onde a direção muda
+            for (let s = SNAKE_LEN - 1; s >= 0; s--) {
+              const at = (t) => path[Math.max(0, t - s)];
+              const frames = [];
+              for (let t = 0; t <= T; t++) {
+                const [x, y] = at(t);
+                if (t > 0 && t < T) {
+                  const [px0, py0] = at(t - 1);
+                  const [px1, py1] = at(t + 1);
+                  if (x - px0 === px1 - x && y - py0 === py1 - y) continue;
+                }
+                frames.push(`${pct(t)}{transform:translate(${x * PITCH}px,${y * PITCH}px)}`);
+              }
+              const size = CELL - s * 1.2;
+              const off = PAD + (CELL - size) / 2;
+              const opacity = (1 - s * 0.12).toFixed(2);
+              css.push(`@keyframes s${s}{${frames.join("")}}.s${s}{animation:s${s} ${dur}s linear infinite}`);
+              body.push(
+                `<rect class="s${s}" x="${off}" y="${off}" width="${size}" height="${size}" rx="${size / 3}" fill="${pal.snake}" opacity="${opacity}"/>`
+              );
+            }
+
+            return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><style>${css.join("")}</style>${body.join("")}</svg>`;
+          }
+
+          // ---------- Cartões de estatísticas (substituem serviços externos que saem do ar) ----------
+
+          const CARD_THEMES = {
+            light: { bg: "#ffffff", border: "#d0d7de", title: "#0969da", text: "#1f2328", muted: "#59636e", accent: "#1a7f37", bar: "#40c463" },
+            dark: { bg: "#0d1117", border: "#30363d", title: "#58a6ff", text: "#e6edf3", muted: "#8b949e", accent: "#3fb950", bar: "#26a641" },
+          };
+          const MONTHS = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+          const FONT = "font-family:'Segoe UI',Ubuntu,'Helvetica Neue',Sans-Serif";
+
+          function summarize(cells) {
+            const total = cells.reduce((s, c) => s + c.count, 0);
+            const active = cells.filter((c) => c.count > 0).length;
+            const best = cells.reduce((a, c) => (c.count > a.count ? c : a), cells[0]);
+            const months = new Map();
+            for (const c of cells) {
+              const k = c.date.slice(0, 7);
+              months.set(k, (months.get(k) ?? 0) + c.count);
+            }
+            const monthList = [...months].map(([k, v]) => ({ label: MONTHS[Number(k.slice(5)) - 1], year: k.slice(0, 4), count: v }));
+            const top = monthList.reduce((a, m) => (m.count > a.count ? m : a), monthList[0]);
+            return { total, active, days: cells.length, best, monthList, top };
+          }
+
+          const fmtDate = (iso) => {
+            const [y, m, d] = iso.split("-");
+            return `${Number(d)} ${MONTHS[Number(m) - 1]} ${y}`;
+          };
+
+          function renderStats(s, t) {
+            const rows = [
+              ["Dias com commits", `${s.active} de ${s.days}`],
+              ["Maior dia", `${s.best.count} em ${fmtDate(s.best.date)}`],
+              ["Mês mais ativo", `${s.top.label}/${s.top.year} · ${s.top.count}`],
+              ["Média por dia ativo", (s.total / Math.max(1, s.active)).toFixed(1)],
+            ];
+            const lines = rows
+              .map(([k, v], i) => {
+                const y = 98 + i * 26;
+                return `<text x="25" y="${y}" fill="${t.muted}" font-size="14">${k}</text><text x="470" y="${y}" fill="${t.text}" font-size="14" font-weight="600" text-anchor="end">${v}</text>`;
+              })
+              .join("");
+            return `<svg xmlns="http://www.w3.org/2000/svg" width="495" height="195" viewBox="0 0 495 195"><style>text{${FONT}}.f{animation:f .8s ease-in-out forwards;opacity:0}@keyframes f{to{opacity:1}}</style><rect x=".5" y=".5" width="494" height="194" rx="6" fill="${t.bg}" stroke="${t.border}"/><text x="25" y="38" fill="${t.title}" font-size="18" font-weight="600">Estatísticas do último ano</text><text x="470" y="40" fill="${t.accent}" font-size="28" font-weight="700" text-anchor="end">${s.total}</text><text x="470" y="58" fill="${t.muted}" font-size="11" text-anchor="end">contribuições</text><g class="f">${lines}</g></svg>`;
+          }
+
+          function renderMonths(s, t) {
+            const W = 990, H = 220, left = 30, right = 20, top = 56, bottom = 34;
+            const n = s.monthList.length;
+            const slot = (W - left - right) / n;
+            const barW = Math.min(40, slot * 0.6);
+            const max = Math.max(1, ...s.monthList.map((m) => m.count));
+            const bars = s.monthList
+              .map((m, i) => {
+                const h = Math.max(m.count ? 3 : 0, ((H - top - bottom) * m.count) / max);
+                const x = left + i * slot + (slot - barW) / 2;
+                const y = H - bottom - h;
+                return (
+                  `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" rx="4" fill="${m === s.top ? t.accent : t.bar}"/>` +
+                  (m.count ? `<text x="${(x + barW / 2).toFixed(1)}" y="${(y - 6).toFixed(1)}" fill="${t.muted}" font-size="11" text-anchor="middle">${m.count}</text>` : "") +
+                  `<text x="${(x + barW / 2).toFixed(1)}" y="${H - 14}" fill="${t.muted}" font-size="12" text-anchor="middle">${m.label}</text>`
+                );
+              })
+              .join("");
+            return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><style>text{${FONT}}</style><rect x=".5" y=".5" width="${W - 1}" height="${H - 1}" rx="6" fill="${t.bg}" stroke="${t.border}"/><text x="25" y="34" fill="${t.title}" font-size="18" font-weight="600">Contribuições por mês</text><line x1="${left}" y1="${H - bottom}" x2="${W - right}" y2="${H - bottom}" stroke="${t.border}"/>${bars}</svg>`;
+          }
+
+          const cells = await loadCells(USER);
+          const route = buildRoute(cells);
+          const stats = summarize(cells);
+          mkdirSync(OUT_DIR, { recursive: true });
+          writeFileSync(`${OUT_DIR}/github-snake.svg`, render(cells, route, PALETTES.light));
+          writeFileSync(`${OUT_DIR}/github-snake-dark.svg`, render(cells, route, PALETTES.dark));
+          writeFileSync(`${OUT_DIR}/stats.svg`, renderStats(stats, CARD_THEMES.light));
+          writeFileSync(`${OUT_DIR}/stats-dark.svg`, renderStats(stats, CARD_THEMES.dark));
+          writeFileSync(`${OUT_DIR}/months.svg`, renderMonths(stats, CARD_THEMES.light));
+          writeFileSync(`${OUT_DIR}/months-dark.svg`, renderMonths(stats, CARD_THEMES.dark));
+          console.log(`Semente ${SEED}: ${route.path.length} passos, ${ROUNDS} voltas, ${route.apples.length} maçãs bônus`);
+          console.log(`Estatísticas: ${stats.total} contribuições, ${stats.active} dias ativos`);
+          SCRIPT_EOF
+          node profile.mjs ${{ github.repository_owner }} dist
+
+      # Publica só os SVGs na branch "output", substituindo a versão anterior
+      - name: Publicar na branch output
+        working-directory: dist
+        run: |
+          git init -q -b output
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -q -m "Atualiza cobrinha e estatísticas"
+          git push -q -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" output
