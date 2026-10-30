@@ -18,19 +18,6 @@
 
 ---
 
-### 👨‍💻 Sobre mim
-
-```js
-const carlos = {
-  nome: "Carlos Coelho",
-  local: "Aracaju, Sergipe 🇧🇷",
-  cargo: "Junior Programmer",
-  trabalhandoEm: "Operia @ Celi Empreendimentos Hoteleiros",
-  aprendendo: ["Arquitetura de software", "Boas práticas", "Cloud"],
-  curiosidade: "Café ☕ + código = produtividade",
-};
-```
-
 - 🔭 Atualmente trabalhando no **Operia**, na [Celi Empreendimentos Hoteleiros](https://github.com/Celi-Empreendimentos-Hoteleiros)
 - 🌱 Estudando e evoluindo todos os dias
 - 💬 Pode me chamar pra trocar ideia sobre programação!
@@ -54,7 +41,7 @@ const carlos = {
   <tr>
     <td align="center"><img src="https://skillicons.dev/icons?i=html,vite&perline=2" /></td>
     <td align="center"><img src="https://skillicons.dev/icons?i=npm,powershell&perline=2" /></td>
-    <td align="center"><img src="https://skillicons.dev/icons?i=github,eclipse,notion,discord&perline=4" /></td>
+    <td align="center"><img src="https://skillicons.dev/icons?i=github,vscode,notion,discord&perline=4" /></td>
     <td align="center"><img src="https://skillicons.dev/icons?i=ae,pr&perline=2" /></td>
   </tr>
 </table>
@@ -72,13 +59,6 @@ const carlos = {
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://streak-stats.demolab.com?user=Carlinhos09&theme=github-dark-blue&hide_border=false&background=0d1117&border=30363d&ring=58a6ff&fire=3fb950&currStreakLabel=58a6ff&locale=pt_BR" />
     <img height="170" alt="Sequência" src="https://streak-stats.demolab.com?user=Carlinhos09&theme=default&background=ffffff&border=d0d7de&ring=0969da&fire=1a7f37&currStreakLabel=0969da&locale=pt_BR" />
-  </picture>
-</p>
-
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Carlinhos09/Carlinhos09/output/months-dark.svg" />
-    <img width="100%" alt="Contribuições por mês" src="https://raw.githubusercontent.com/Carlinhos09/Carlinhos09/output/months.svg" />
   </picture>
 </p>
 
