@@ -29,9 +29,9 @@
   </tr>
   <tr>
     <td align="center"><img src="https://skillicons.dev/icons?i=html,vite&perline=2" /></td>
-    <td align="center"><img src="https://skillicons.dev/icons?i=npm,powershell&perline=2" /></td>
+    <td align="center"><img src="https://skillicons.dev/icons?i=java,mysql,postgresql&perline=3" /></td>
     <td align="center"><img src="https://skillicons.dev/icons?i=github,vscode,notion,discord&perline=4" /></td>
-    <td align="center"><img src="https://skillicons.dev/icons?i=ae,pr&perline=2" /></td>
+    <td align="center"><img src="https://skillicons.dev/icons?i=ae,photoshop,pr&perline=3" /></td>
   </tr>
 </table>
 
