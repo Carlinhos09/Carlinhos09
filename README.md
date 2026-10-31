@@ -17,7 +17,7 @@
 
 <p align="center"><b>Principais</b></p>
 <p align="center">
-  <img src="https://skillicons.dev/icons?i=js,ts,react,nodejs,python,supabase,docker&perline=7" />
+  <img src="https://skillicons.dev/icons?i=js,ts,react,nextjs,nodejs,python,supabase,docker&perline=8" />
 </p>
 
 <table align="center">
